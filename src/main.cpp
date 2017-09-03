@@ -5,8 +5,8 @@
 #include <thread>
 #include <vector>
 #include "Eigen-3.3/Eigen/Core"
-#include "Eigen-3.3/Eigen/QR"
 #include "MPC.h"
+#include "Poly.h"
 #include "json.hpp"
 
 // for convenience
@@ -32,52 +32,20 @@ string hasData(string s) {
   return "";
 }
 
-// Evaluate a polynomial.
-double polyeval(Eigen::VectorXd coeffs, double x) {
-  double result = 0.0;
-  for (int i = 0; i < coeffs.size(); i++) {
-    result += coeffs[i] * pow(x, i);
-  }
-  return result;
-}
-
-// Fit a polynomial.
-// Adapted from
-// https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
-  assert(xvals.size() == yvals.size());
-  assert(order >= 1 && order <= xvals.size() - 1);
-  Eigen::MatrixXd A(xvals.size(), order + 1);
-
-  for (int i = 0; i < xvals.size(); i++) {
-    A(i, 0) = 1.0;
-  }
-
-  for (int j = 0; j < xvals.size(); j++) {
-    for (int i = 0; i < order; i++) {
-      A(j, i + 1) = A(j, i) * xvals(j);
-    }
-  }
-
-  auto Q = A.householderQr();
-  auto result = Q.solve(yvals);
-  return result;
-}
-
 int main() {
   uWS::Hub h;
 
   // MPC is initialized here!
   MPC mpc;
+  double latency = 0.1;
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&mpc,&latency](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    // cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -91,55 +59,80 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double delta = j[1]["steering_angle"];
 
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          double steer_value;
-          double throttle_value;
+          v *= 0.447; // convert to m/s
+          delta *= -1; // flip steering angle for solver
 
+          // Transform waypoints to car coordinates
+          Eigen::VectorXd wypts_x(ptsx.size());
+          Eigen::VectorXd wypts_y(ptsx.size());
+          for (unsigned int i=0; i < ptsx.size(); i++) {
+            double x = ptsx[i] - px;
+            double y = ptsy[i] - py;
+            wypts_x[i] =  x*cos(psi) + y*sin(psi);
+            wypts_y[i] = -x*sin(psi) + y*cos(psi);
+          }
+
+          // Fit with 3rd order polynomial
+          auto coeffs = polyfit(wypts_x, wypts_y, 3);
+
+          // Current errors
+          double cte = coeffs[0]; // since we are at the origin
+          double epsi = -atan(coeffs[1]); // x=0 (since we are at origin), minus sign because we want angle relative to truth, not to truth relative to car.
+          // std::cout << epsi << "\t";
+
+          // Initialize state vector
+          Eigen::VectorXd state = Eigen::VectorXd::Zero(6);
+          state[3] = v;
+          state[4] = cte;
+          state[5] = epsi;
+
+          // Solve system
+          auto mpc_sol = mpc.Solve(state, coeffs, latency);
+          int N = (mpc_sol.size() - 2)/2; // number of solver steps
+
+          // Extract the actuator commands
+          double steer_value = mpc_sol[0] / (deg2rad(25)); // range [-1,1]
+          double throttle_value = mpc_sol[1];
+
+          /* Create commands to send to simulator */
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+
+          msgJson["steering_angle"] = -steer_value; // flip steering angle back for simulator
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          //Display the MPC predicted trajectory : green
+          vector<double> mpc_x_vals(N);
+          vector<double> mpc_y_vals(N);
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
+          for (int i=0; i<N; i++ ) {
+            mpc_x_vals[i] = mpc_sol[2*(i+1)];
+            mpc_y_vals[i] = mpc_sol[2*(i+1)+1];
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
-          //Display the waypoints/reference line
+          //Display the waypoints/reference line : yellow
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
+          for (unsigned int i=0; i < ptsx.size(); i++) {
+            next_x_vals.push_back(wypts_x[i]);
+            next_y_vals.push_back(wypts_y[i]);
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
-          // Latency
-          // The purpose is to mimic real driving conditions where
+
+          // Model latency to mimic real driving conditions where
           // the car does actuate the commands instantly.
-          //
-          // Feel free to play around with this value but should be to drive
-          // around the track with 100ms latency.
-          //
-          // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
-          // SUBMITTING.
           this_thread::sleep_for(chrono::milliseconds(100));
+
+          // send commands
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
