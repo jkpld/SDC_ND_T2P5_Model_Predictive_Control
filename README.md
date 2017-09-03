@@ -52,25 +52,25 @@ The weight factors, w<sub>(.)</sub> terms, and the reference speed are given by
 * w<sub>v</sub> = 30
 * v<sub>ref</sub> = 20 + 170 RoC
 
-where RoC is the "normalized" radius of curvature of the polynomial fitted to the waypoints and has a value &in; [0,1] (see below). The RoC value is close to zero for sharp turns and close to one on very straight roads. Thus, when driving on a straight road, w<sub>d&delta;</sub> is very large, which significantly damps out any change is the cars steering angle; however, when the road has a sharp turn, w<sub>d&delta;</sub> becomes small, allowing for large, but smooth, changes in the steering angle. Likewise, the reference speed is very large when the road is straight, but during a turn, it becomes quite small.
+where RoC is the "normalized" radius of curvature of the polynomial fitted to the waypoints and has a value &in; [0,1] (see below). The RoC value is close to zero for sharp turns and close to one on very straight roads. Thus, when driving on a straight road, w<sub>d&delta;</sub> is very large, which significantly damps out any change in the cars steering angle; however, when the road has a sharp turn, w<sub>d&delta;</sub> becomes small, allowing for large, but smooth, changes in the steering angle. Likewise, the reference speed is very large when the road is straight, but during a turn, it becomes quite small.
 
 #### Road curvature
 If the path we want to travel along (the road) is given by a polynomial f(x), then
 
   roc &leftarrow; (1 + (df/dx)<sup>2</sup>)<sup>3/2</sup> / |d<sup>2</sup>f/dx<sup>2</sup>|  
-  RoC &leftarrow; max(roc, 500)/500
+  RoC &leftarrow; min(roc, 500)/500
 
-The radius of curvature is evaluated 25 meters in front of the cars location current location; this gives lookahead capabilities.
+The radius of curvature is evaluated 25 meters in front of the car's current location; this gives lookahead capabilities.
 
 ## Modeled time steps and latency compensation
-The number of time-steps modeled was a fixed value of N = 10. This allowed for sufficient resolution, while also decreasing the modeling time that comes with modeling more time-steps.
+The number of time-steps modeled was a fixed value of N = 10. This allowed for sufficient resolution, while also decreasing the increased modeling time that comes with modeling more time-steps.
 
 #### Latency compensation
 Latency is very simple to compensate for using the MPC because the very first time step is simply set to the expected latency, dt<sub>1</sub> = t<sub>latency</sub>.
 
 #### Distance controlled time steps
 
-The duration of the remaining N-1 time-steps, dt [sec], was implicitly set by changing the distance, d [m], in front of the car that was modeled.
+The duration of the remaining N-1 time-steps, dt<sub>n>1</sub> [sec], was implicitly set by changing the distance, d [m], in front of the car that was modeled.
 
 d = 50 + 30 RoC - t<sub>latency</sub> v<sub>0</sub>  
 dt<sub>n>1</sub> = d / ((N-1)*v<sub>0</sub> + &epsilon;),  
