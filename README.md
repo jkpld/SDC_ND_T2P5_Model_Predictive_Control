@@ -6,6 +6,8 @@ Self-Driving Car Engineer Nanodegree Program
 ## Result
 The car successfully drives around the track without leaving the road, but crossing the lane lines. The minimum car speed is >~60 and the maximum car speed is just over 100.
 
+![example_top_speed](example_run_image.png)
+
 ## Vehicle model
 The vehicle model used was the global kinematic model discussed in the lessons.
 * Variables :
